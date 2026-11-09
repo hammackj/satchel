@@ -18,7 +18,10 @@
 local ADDON, ns = ...
 local C = C_Container
 
-local DEFAULTS = { columns = 10, bankColumns = 14, scale = 1 }
+local DEFAULTS = {
+	columns = 10, bankColumns = 14, scale = 1,
+	itemLevel = true, junkIcon = true, tooltipCounts = true,
+}
 local CHARACTER_BANK = Enum.BankType and Enum.BankType.Character or 0
 
 local function say(msg)
@@ -82,12 +85,33 @@ end
 local atBank = false
 local closeBank = C_Bank and C_Bank.CloseBankFrame or CloseBankFrame
 
-local inventory = ns.NewWindow('Inventory', {
-	title = function() return UnitName('player') end,
+local inventory, bank
+
+-- Title-bar button: show the bank (saved copy when away from a banker) of
+-- whoever the bag window is showing.
+local function toggleBank()
+	if bank:IsShown() then
+		bank:Hide()
+	else
+		bank.owner = inventory.owner
+		bank:Open()
+	end
+end
+
+local junkButton -- created below, shown at merchants
+
+inventory = ns.NewWindow('Inventory', {
+	title = function() return ns.CharacterLabel(ns.me) end,
 	bags = ns.InventoryBags,
+	store = 'inventory',
+	live = function() return true end,
 	columns = 'columns',
 	money = true,
 	sort = C.SortBags,
+	buttons = { { 'Interface\\Icons\\INV_Misc_Coin_02', 'Bank', toggleBank } },
+	onRender = function(live)
+		ns.UpdateJunkButton(live)
+	end,
 	default = { 'BOTTOMRIGHT', 'BOTTOMRIGHT', -60, 120 },
 	-- Closed by the X button or Escape: tell Blizzard's bag state too, so the
 	-- next bag keypress opens instead of closing.
@@ -98,9 +122,11 @@ local inventory = ns.NewWindow('Inventory', {
 	end,
 })
 
-local bank = ns.NewWindow('Bank', {
-	title = function() return BANK or 'Bank' end,
+bank = ns.NewWindow('Bank', {
+	title = function() return ns.CharacterLabel(ns.me) .. ' - ' .. (BANK or 'Bank') end,
 	bags = ns.BankBags,
+	store = 'bank',
+	live = function() return atBank end,
 	columns = 'bankColumns',
 	sort = function()
 		if C.SortBank then
@@ -173,10 +199,77 @@ local function onBlizzardBankShown(panel)
 		panel:SetScript('OnHide', nil)
 		panel:SetParent(parked)
 		atBank = true
-		bank:Open()
+		bank.owner = nil
+		if bank:IsShown() then
+			bank:Render()
+		else
+			bank:Open()
+		end
 	else
 		panel:SetScript('OnHide', blizzardBankOnHide or nil)
 		panel:SetParent(UIParent)
+	end
+end
+
+--[[ Junk ]]--
+
+local atMerchant = false
+local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+local coins = C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString or GetMoneyString or tostring
+
+-- Grey items that sell for something, with their total value.
+local function junk()
+	local slots, value = {}, 0
+	for _, bag in ipairs(ns.InventoryBags()) do
+		for slot = 1, C.GetContainerNumSlots(bag) or 0 do
+			local info = C.GetContainerItemInfo(bag, slot)
+			if info and info.quality == 0 and not info.hasNoValue then
+				slots[#slots + 1] = { bag, slot }
+				local price = select(11, GetItemInfo(info.hyperlink))
+				value = value + (price or 0) * (info.stackCount or 1)
+			end
+		end
+	end
+	return slots, value
+end
+
+local function sellJunk()
+	if C_MerchantFrame and C_MerchantFrame.SellAllJunkItems then
+		C_MerchantFrame.SellAllJunkItems()
+		return
+	end
+	-- Older clients: sell one by one. Twelve keeps everything in the buyback list.
+	for i, s in ipairs((junk())) do
+		if i > 12 then
+			break
+		end
+		C.UseContainerItem(s[1], s[2])
+	end
+end
+
+junkButton = CreateFrame('Button', nil, inventory, 'UIPanelButtonTemplate')
+junkButton:SetSize(80, 20)
+junkButton:SetPoint('BOTTOM', 0, 8)
+junkButton:SetText('Sell junk')
+junkButton:Hide()
+junkButton:SetScript('OnClick', sellJunk)
+junkButton:SetScript('OnEnter', function(self)
+	local slots, value = junk()
+	GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+	GameTooltip:SetText('Sell junk')
+	GameTooltip:AddLine(#slots .. ' grey item(s) worth ' .. coins(value), 1, 1, 1)
+	GameTooltip:Show()
+end)
+junkButton:SetScript('OnLeave', GameTooltip_Hide)
+
+function ns.UpdateJunkButton(live)
+	if live == nil then
+		live = inventory:IsLive()
+	end
+	local show = atMerchant and live
+	junkButton:SetShown(show)
+	if show then
+		junkButton:SetEnabled(#(junk()) > 0)
 	end
 end
 
@@ -208,6 +301,8 @@ function handlers.ADDON_LOADED(name)
 end
 
 function handlers.PLAYER_LOGIN()
+	ns.InitData()
+	ns.SaveInventory()
 	eachBlizzardBag(function(f)
 		f:SetParent(hidden)
 	end)
@@ -223,31 +318,71 @@ end
 function handlers.BANKFRAME_OPENED()
 	-- Tab contents can arrive a moment after the banker opens on the first visit.
 	C_Timer.After(0.3, function()
-		bank:Refresh()
+		if atBank then
+			ns.SaveBank()
+			bank:Refresh()
+		end
 	end)
 end
 
 function handlers.BANKFRAME_CLOSED()
+	if atBank then
+		ns.SaveBank()
+	end
 	atBank = false
 	bank:Close()
 end
 
 function handlers.BAG_UPDATE_DELAYED()
+	ns.SaveInventory()
+	if atBank then
+		ns.SaveBank()
+	end
 	inventory:Refresh()
 	bank:Refresh()
 end
+handlers.PLAYER_EQUIPMENT_CHANGED = handlers.BAG_UPDATE_DELAYED
 handlers.BAG_CONTAINER_UPDATE = handlers.BAG_UPDATE_DELAYED
 handlers.QUEST_ACCEPTED = handlers.BAG_UPDATE_DELAYED
 handlers.QUEST_REMOVED = handlers.BAG_UPDATE_DELAYED
 
 function handlers.PLAYERBANKSLOTS_CHANGED()
+	if atBank then
+		ns.SaveBank()
+	end
 	bank:Refresh()
 end
 handlers.BANK_TABS_CHANGED = handlers.PLAYERBANKSLOTS_CHANGED
 handlers.BANK_TAB_SETTINGS_UPDATED = handlers.PLAYERBANKSLOTS_CHANGED
 
 function handlers.PLAYER_MONEY()
+	ns.SaveInventory()
 	inventory:Refresh()
+end
+
+function handlers.MERCHANT_SHOW()
+	atMerchant = true
+	ns.UpdateJunkButton()
+end
+
+function handlers.MERCHANT_CLOSED()
+	atMerchant = false
+	ns.UpdateJunkButton()
+end
+
+-- Item levels and sell prices need item data the client may not have cached
+-- yet; redraw once a burst of it has arrived.
+local itemInfoPending = false
+function handlers.GET_ITEM_INFO_RECEIVED()
+	if itemInfoPending then
+		return
+	end
+	itemInfoPending = true
+	C_Timer.After(0.3, function()
+		itemInfoPending = false
+		inventory:Refresh()
+		bank:Refresh()
+	end)
 end
 
 function handlers.ITEM_LOCK_CHANGED(bag, slot)
@@ -313,6 +448,18 @@ SlashCmdList.SATCHEL = function(msg)
 			w:RestorePosition()
 		end
 		say('positions reset')
+	elseif cmd == 'ilvl' or cmd == 'junk' or cmd == 'counts' then
+		local key = ({ ilvl = 'itemLevel', junk = 'junkIcon', counts = 'tooltipCounts' })[cmd]
+		SatchelDB[key] = not SatchelDB[key]
+		inventory:Refresh()
+		bank:Refresh()
+		say(cmd .. ' ' .. (SatchelDB[key] and 'on' or 'off'))
+	elseif cmd == 'forget' then
+		if arg == '' then
+			say('usage: /satchel forget <character name>')
+		else
+			say('forgot ' .. ns.Forget(arg) .. ' character(s) named ' .. arg)
+		end
 	elseif cmd == 'errors' then
 		local log = SatchelDB.debug and SatchelDB.debug.errors or {}
 		if arg == 'clear' then
@@ -325,6 +472,9 @@ SlashCmdList.SATCHEL = function(msg)
 		ToggleAllBags()
 	else
 		say('/satchel  - toggle bags')
-		say('/satchel cols <n> | bankcols <n> | scale <x> | reset | errors [clear]')
+		say('/satchel cols <n> | bankcols <n> | scale <x> | reset')
+		say('/satchel ilvl | junk | counts  - toggle item level, junk coin, tooltip counts')
+		say('/satchel forget <name>  - drop a deleted character\'s saved bags')
+		say('/satchel errors [clear]')
 	end
 end

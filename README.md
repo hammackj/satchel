@@ -8,6 +8,10 @@ All your bags in one window, for WoW Forever.
 - New-item glow, cleared when you hover the item
 - Search by item name
 - Sort button
+- Item counts on tooltips across all your characters (bags, bank, equipped)
+- View any character's bags or bank from anywhere: click the name in the title bar; the coin button opens the bank (a saved copy when you're away from a banker). Saved views have a blue tint and are read-only
+- Sell junk button at vendors, coin marker on grey items
+- Item level on gear
 - Bank window for your character bank tabs (opens at the banker; closing it ends the bank visit)
 - Free slot count and gold
 - Opens with the normal bag keys and buttons; Escape or the X closes it
@@ -20,6 +24,8 @@ All your bags in one window, for WoW Forever.
 /satchel bankcols <n>  items per row in the bank (default 14)
 /satchel scale <x>     window scale, 0.5-2
 /satchel reset         move the windows back to their default spots
+/satchel ilvl | junk | counts   toggle item level, junk coin, tooltip counts
+/satchel forget <name> drop a deleted character's saved bags
 /satchel errors [clear]
 ```
 

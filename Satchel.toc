@@ -8,5 +8,6 @@
 ## IconTexture: Interface\Icons\INV_Misc_Bag_08
 
 Debug.lua
+Data.lua
 Window.lua
 Satchel.lua
