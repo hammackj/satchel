@@ -36,7 +36,7 @@ local function snapshot(bags)
 			for slot = 1, size do
 				local info = C.GetContainerItemInfo(bag, slot)
 				if info and info.hyperlink then
-					t[slot] = { l = info.hyperlink, c = info.stackCount, q = info.quality, id = info.itemID }
+					t[slot] = { l = info.hyperlink, c = info.stackCount, q = info.quality, id = info.itemID, b = info.isBound or nil }
 				end
 			end
 			out[bag] = t
@@ -50,7 +50,7 @@ function ns.SaveInventory()
 	if not c then
 		return
 	end
-	c.inventory = snapshot(ns.InventoryBags())
+	c.inventory = snapshot(ns.InventoryBags(true))
 	c.money = GetMoney()
 	local equipped = {}
 	for slot = 1, 19 do
@@ -71,6 +71,51 @@ function ns.SaveBank()
 	end
 	c.bank = snapshot(ns.BankBags())
 	index[ns.me] = nil
+end
+
+--[[ Gold ]]--
+
+local coinString = C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString or GetCoinTextureString
+
+function ns.Coins(copper)
+	copper = copper or 0
+	if coinString then
+		return coinString(copper)
+	end
+	return ('%dg %ds %dc'):format(floor(copper / 10000), floor(copper / 100) % 100, copper % 100)
+end
+
+-- Every character's gold, richest first, with a total.
+function ns.ShowGoldTooltip(owner)
+	GameTooltip:SetOwner(owner, 'ANCHOR_TOPRIGHT')
+	GameTooltip:SetText('Gold')
+	local keys, total = ns.CharacterKeys(), 0
+	table.sort(keys, function(a, b)
+		return (ns.Character(a).money or 0) > (ns.Character(b).money or 0)
+	end)
+	for _, key in ipairs(keys) do
+		local money = ns.Character(key).money or 0
+		total = total + money
+		GameTooltip:AddDoubleLine(ns.CharacterLabel(key), ns.Coins(money), 1, 1, 1, 1, 1, 1)
+	end
+	if #keys > 1 then
+		GameTooltip:AddDoubleLine('Total', ns.Coins(total), 1, 0.82, 0, 1, 1, 1)
+	end
+	GameTooltip:Show()
+end
+
+--[[ Protected items ]]--
+-- Alt-click marks an item (by item ID, account-wide) so Sell junk and
+-- right-click selling at a vendor leave it alone.
+
+function ns.IsProtected(itemID)
+	return itemID ~= nil and SatchelDB.protected[itemID] == true
+end
+
+function ns.ToggleProtected(itemID, link)
+	SatchelDB.protected[itemID] = not SatchelDB.protected[itemID] or nil
+	print('|cff33ff99Satchel|r: ' .. (link or itemID) .. (SatchelDB.protected[itemID] and ' is protected from selling' or ' is no longer protected'))
+	ns.RefreshAll()
 end
 
 --[[ Characters ]]--

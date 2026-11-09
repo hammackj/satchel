@@ -21,6 +21,7 @@ local C = C_Container
 local DEFAULTS = {
 	columns = 10, bankColumns = 14, scale = 1,
 	itemLevel = true, junkIcon = true, tooltipCounts = true,
+	boe = true, upgrades = true, showKeyring = true,
 }
 local CHARACTER_BANK = Enum.BankType and Enum.BankType.Character or 0
 
@@ -35,12 +36,13 @@ local NUM_BANK_TABS = NUM_BANKBAGSLOTS
 	or (Constants and Constants.InventoryConstants and Constants.InventoryConstants.NumCharacterBankSlots)
 	or 0
 
-function ns.InventoryBags()
+-- all: include the keyring even when it's hidden (for saving).
+function ns.InventoryBags(all)
 	local bags = {}
 	for bag = BACKPACK_CONTAINER or 0, NUM_BAGS do
 		bags[#bags + 1] = bag
 	end
-	if KEYRING_CONTAINER and HasKey and HasKey() then
+	if KEYRING_CONTAINER and HasKey and HasKey() and (all or SatchelDB.showKeyring) then
 		bags[#bags + 1] = KEYRING_CONTAINER
 	end
 	return bags
@@ -108,7 +110,13 @@ inventory = ns.NewWindow('Inventory', {
 	columns = 'columns',
 	money = true,
 	sort = C.SortBags,
-	buttons = { { 'Interface\\Icons\\INV_Misc_Coin_02', 'Bank', toggleBank } },
+	buttons = {
+		{ 'Interface\\Icons\\INV_Misc_Coin_02', 'Bank', toggleBank },
+		{ 'Interface\\Icons\\INV_Misc_Key_03', 'Show/hide keyring', function()
+			SatchelDB.showKeyring = not SatchelDB.showKeyring
+			inventory:Refresh()
+		end },
+	},
 	onRender = function(live)
 		ns.UpdateJunkButton(live)
 	end,
@@ -144,6 +152,11 @@ bank = ns.NewWindow('Bank', {
 })
 
 ns.Inventory, ns.Bank = inventory, bank
+
+function ns.RefreshAll()
+	inventory:Refresh()
+	bank:Refresh()
+end
 
 local function sync()
 	if ns.BlizzardBagsOpen() then
@@ -215,35 +228,46 @@ end
 
 local atMerchant = false
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
-local coins = C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString or GetMoneyString or tostring
 
--- Grey items that sell for something, with their total value.
+function ns.AtMerchant()
+	return atMerchant
+end
+
+-- Grey items that sell for something and aren't protected, with their total
+-- value, and whether any grey item was skipped because it's protected.
 local function junk()
-	local slots, value = {}, 0
-	for _, bag in ipairs(ns.InventoryBags()) do
+	local slots, value, skipped = {}, 0, false
+	for _, bag in ipairs(ns.InventoryBags(true)) do
 		for slot = 1, C.GetContainerNumSlots(bag) or 0 do
 			local info = C.GetContainerItemInfo(bag, slot)
 			if info and info.quality == 0 and not info.hasNoValue then
-				slots[#slots + 1] = { bag, slot }
-				local price = select(11, GetItemInfo(info.hyperlink))
-				value = value + (price or 0) * (info.stackCount or 1)
+				if ns.IsProtected(info.itemID) then
+					skipped = true
+				else
+					slots[#slots + 1] = { bag, slot }
+					local price = select(11, GetItemInfo(info.hyperlink))
+					value = value + (price or 0) * (info.stackCount or 1)
+				end
 			end
 		end
 	end
-	return slots, value
+	return slots, value, skipped
 end
 
 local function sellJunk()
-	if C_MerchantFrame and C_MerchantFrame.SellAllJunkItems then
+	local slots, _, skipped = junk()
+	-- Blizzard's sell-all would also sell protected greys, so only use it when there are none.
+	if not skipped and C_MerchantFrame and C_MerchantFrame.SellAllJunkItems then
 		C_MerchantFrame.SellAllJunkItems()
 		return
 	end
-	-- Older clients: sell one by one. Twelve keeps everything in the buyback list.
-	for i, s in ipairs((junk())) do
-		if i > 12 then
-			break
-		end
-		C.UseContainerItem(s[1], s[2])
+	-- One at a time, spaced out so the vendor keeps up.
+	for i, s in ipairs(slots) do
+		C_Timer.After((i - 1) * 0.2, function()
+			if atMerchant then
+				C.UseContainerItem(s[1], s[2])
+			end
+		end)
 	end
 end
 
@@ -257,7 +281,10 @@ junkButton:SetScript('OnEnter', function(self)
 	local slots, value = junk()
 	GameTooltip:SetOwner(self, 'ANCHOR_TOP')
 	GameTooltip:SetText('Sell junk')
-	GameTooltip:AddLine(#slots .. ' grey item(s) worth ' .. coins(value), 1, 1, 1)
+	GameTooltip:AddLine(#slots .. ' grey item(s) worth ' .. ns.Coins(value), 1, 1, 1)
+	if select(3, junk()) then
+		GameTooltip:AddLine('Protected items are kept', 0.6, 0.6, 0.6)
+	end
 	GameTooltip:Show()
 end)
 junkButton:SetScript('OnLeave', GameTooltip_Hide)
@@ -289,6 +316,7 @@ function handlers.ADDON_LOADED(name)
 		end
 	end
 	SatchelDB.positions = SatchelDB.positions or {}
+	SatchelDB.protected = SatchelDB.protected or {}
 	if SatchelDB.point then -- 0.1 kept a single position
 		SatchelDB.positions.Inventory, SatchelDB.point = SatchelDB.point, nil
 	end
@@ -359,6 +387,13 @@ function handlers.PLAYER_MONEY()
 	ns.SaveInventory()
 	inventory:Refresh()
 end
+
+-- What this character can wear changes with level and skills.
+function handlers.PLAYER_LEVEL_UP()
+	ns.ClearUsableCache()
+	ns.RefreshAll()
+end
+handlers.SKILL_LINES_CHANGED = handlers.PLAYER_LEVEL_UP
 
 function handlers.MERCHANT_SHOW()
 	atMerchant = true
@@ -448,8 +483,11 @@ SlashCmdList.SATCHEL = function(msg)
 			w:RestorePosition()
 		end
 		say('positions reset')
-	elseif cmd == 'ilvl' or cmd == 'junk' or cmd == 'counts' then
-		local key = ({ ilvl = 'itemLevel', junk = 'junkIcon', counts = 'tooltipCounts' })[cmd]
+	elseif cmd == 'ilvl' or cmd == 'junk' or cmd == 'counts' or cmd == 'boe' or cmd == 'upgrades' or cmd == 'keys' then
+		local key = ({
+			ilvl = 'itemLevel', junk = 'junkIcon', counts = 'tooltipCounts',
+			boe = 'boe', upgrades = 'upgrades', keys = 'showKeyring',
+		})[cmd]
 		SatchelDB[key] = not SatchelDB[key]
 		inventory:Refresh()
 		bank:Refresh()
@@ -473,7 +511,8 @@ SlashCmdList.SATCHEL = function(msg)
 	else
 		say('/satchel  - toggle bags')
 		say('/satchel cols <n> | bankcols <n> | scale <x> | reset')
-		say('/satchel ilvl | junk | counts  - toggle item level, junk coin, tooltip counts')
+		say('/satchel ilvl | boe | upgrades | junk | counts | keys  - toggle item level, BoE, upgrade arrows, junk coin, tooltip counts, keyring')
+		say('Alt-click an item to protect it from selling')
 		say('/satchel forget <name>  - drop a deleted character\'s saved bags')
 		say('/satchel errors [clear]')
 	end

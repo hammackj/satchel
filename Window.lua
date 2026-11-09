@@ -40,22 +40,113 @@ end
 -- (not shirts or tabards).
 local NO_LEVEL = { [''] = true, INVTYPE_NON_EQUIP_IGNORE = true, INVTYPE_BODY = true, INVTYPE_TABARD = true }
 
-local function updateLevel(b, link, quality)
-	local fs = b.satchelLevel
-	if not fs then
-		fs = b:CreateFontString(nil, 'OVERLAY', 'NumberFontNormalSmall')
-		fs:SetPoint('TOPLEFT', 2, -2)
-		fs:SetDrawLayer('OVERLAY', 7)
-		b.satchelLevel = fs
+local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+local BIND_ON_EQUIP = Enum.ItemBind and Enum.ItemBind.OnEquip or 2
+
+-- Equipment slots each kind of gear can go in, for the upgrade arrow.
+-- Off-hand (17) and ranged (18) only count when something is already there,
+-- so a two-hander or an empty ranged slot doesn't make every off-hand an "upgrade".
+local GEAR_SLOTS = {
+	INVTYPE_HEAD = { 1 }, INVTYPE_NECK = { 2 }, INVTYPE_SHOULDER = { 3 },
+	INVTYPE_CHEST = { 5 }, INVTYPE_ROBE = { 5 }, INVTYPE_WAIST = { 6 },
+	INVTYPE_LEGS = { 7 }, INVTYPE_FEET = { 8 }, INVTYPE_WRIST = { 9 },
+	INVTYPE_HAND = { 10 }, INVTYPE_FINGER = { 11, 12 }, INVTYPE_TRINKET = { 13, 14 },
+	INVTYPE_CLOAK = { 15 }, INVTYPE_WEAPON = { 16, 17 }, INVTYPE_2HWEAPON = { 16 },
+	INVTYPE_WEAPONMAINHAND = { 16 }, INVTYPE_WEAPONOFFHAND = { 17 }, INVTYPE_SHIELD = { 17 },
+	INVTYPE_HOLDABLE = { 17 }, INVTYPE_RANGED = { 18 }, INVTYPE_RANGEDRIGHT = { 18 },
+	INVTYPE_THROWN = { 18 }, INVTYPE_RELIC = { 18 },
+}
+local OPTIONAL_SLOT = { [17] = true, [18] = true }
+
+-- Equipment slot of a piece of gear with a meaningful item level, or nil.
+local function gearSlot(link)
+	if not link or not GetItemInfoInstant then
+		return nil
 	end
-	local level
-	if link and SatchelDB.itemLevel and GetItemInfoInstant and GetDetailedItemLevelInfo then
-		local _, _, _, equipLoc, _, classID = GetItemInfoInstant(link)
-		if (classID == 2 or classID == 4) and not NO_LEVEL[equipLoc or ''] then
-			level = GetDetailedItemLevelInfo(link)
+	local _, _, _, equipLoc, _, classID = GetItemInfoInstant(link)
+	if (classID == 2 or classID == 4) and not NO_LEVEL[equipLoc or ''] then
+		return equipLoc
+	end
+end
+
+-- The lowest item level among the slots this gear could replace; nil when there's nothing to compare.
+local function equippedLevel(equipLoc)
+	local lowest
+	for _, slot in ipairs(GEAR_SLOTS[equipLoc] or {}) do
+		local link = GetInventoryItemLink('player', slot)
+		local level = link and GetDetailedItemLevelInfo(link) or (not OPTIONAL_SLOT[slot] and 0) or nil
+		if level and (not lowest or level < lowest) then
+			lowest = level
 		end
 	end
-	if level and level > 1 then
+	return lowest
+end
+
+-- Whether this character can wear it: the item tooltip shows red text
+-- (wrong armor type, level too high, wrong class) when it can't.
+local usableCache = {}
+function ns.ClearUsableCache()
+	wipe(usableCache)
+end
+
+local function isRed(color)
+	return color and color.r > 0.95 and color.g < 0.2 and color.b < 0.2
+end
+
+local function canWear(bag, slot, link)
+	local cached = usableCache[link]
+	if cached ~= nil then
+		return cached
+	end
+	if not (C_TooltipInfo and C_TooltipInfo.GetBagItem) then
+		return false
+	end
+	local data = C_TooltipInfo.GetBagItem(bag, slot)
+	if not data or not data.lines then
+		return false -- not loaded yet; try again on the next refresh
+	end
+	local ok = true
+	for _, line in ipairs(data.lines) do
+		if isRed(line.leftColor) or isRed(line.rightColor) then
+			ok = false
+			break
+		end
+	end
+	usableCache[link] = ok
+	return ok
+end
+
+local function fontString(b, key, point, x, y, font)
+	local fs = b[key]
+	if not fs then
+		fs = b:CreateFontString(nil, 'OVERLAY', font or 'NumberFontNormalSmall')
+		fs:SetPoint(point, x, y)
+		fs:SetDrawLayer('OVERLAY', 7)
+		b[key] = fs
+	end
+	return fs
+end
+
+local function texture(b, key, point, x, y, size)
+	local tex = b[key]
+	if not tex then
+		tex = b:CreateTexture(nil, 'OVERLAY', nil, 7)
+		tex:SetPoint(point, x, y)
+		tex:SetSize(size, size)
+		b[key] = tex
+	end
+	return tex
+end
+
+-- item: { link, quality, id, bound } plus bag/slot when the item is live in
+-- your own bags (needed for the upgrade check).
+local function decorate(b, link, quality, itemID, bound, bag, slot)
+	local equipLoc = gearSlot(link)
+	local level = equipLoc and GetDetailedItemLevelInfo and GetDetailedItemLevelInfo(link)
+
+	-- Item level, top left
+	local fs = fontString(b, 'satchelLevel', 'TOPLEFT', 2, -2)
+	if SatchelDB.itemLevel and level and level > 1 then
 		local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality or 1]
 		fs:SetText(level)
 		if color then
@@ -64,6 +155,43 @@ local function updateLevel(b, link, quality)
 		fs:Show()
 	else
 		fs:Hide()
+	end
+
+	-- "BoE", bottom left
+	local boe = fontString(b, 'satchelBoE', 'BOTTOMLEFT', 2, 2)
+	local bindType = link and not bound and select(14, GetItemInfo(link))
+	if SatchelDB.boe and bindType == BIND_ON_EQUIP then
+		boe:SetText('BoE')
+		boe:SetTextColor(0.3, 0.8, 1)
+		boe:Show()
+	else
+		boe:Hide()
+	end
+
+	-- Upgrade arrow, top right
+	local arrow = texture(b, 'satchelUpgrade', 'TOPRIGHT', -1, -1, 14)
+	local upgrade = false
+	if SatchelDB.upgrades and level and bag then
+		local current = equippedLevel(equipLoc)
+		upgrade = current ~= nil and level > current and canWear(bag, slot, link)
+	end
+	if upgrade then
+		arrow:SetAtlas('bags-greenarrow')
+		arrow:Show()
+	else
+		arrow:Hide()
+	end
+	if b.UpgradeIcon then
+		b.UpgradeIcon:Hide()
+	end
+
+	-- Protected lock, left middle
+	local lock = texture(b, 'satchelLock', 'LEFT', 1, 0, 14)
+	if ns.IsProtected(itemID) then
+		lock:SetTexture('Interface\\Buttons\\LockButton-Locked-Up')
+		lock:Show()
+	else
+		lock:Hide()
 	end
 end
 
@@ -116,6 +244,27 @@ local function newLiveButton(holder, slot)
 	-- glows visible.
 	setGlow(b, false)
 	b:HookScript('OnEnter', markSeen)
+
+	-- Alt-click protects/unprotects the item; right-click at a vendor won't
+	-- sell a protected one. Everything else goes to the template's handler.
+	local click = b:GetScript('OnClick')
+	b:SetScript('OnClick', function(self, button, down)
+		local bag, slot = self:GetParent():GetID(), self:GetID()
+		if button == 'LeftButton' and IsAltKeyDown() and not GetCursorInfo() then
+			local id = C.GetContainerItemID(bag, slot)
+			if id then
+				ns.ToggleProtected(id, C.GetContainerItemLink(bag, slot))
+			end
+			return
+		end
+		if button == 'RightButton' and ns.AtMerchant() and ns.IsProtected(C.GetContainerItemID(bag, slot)) then
+			print('|cff33ff99Satchel|r: that item is protected; Alt-click it first to sell it')
+			return
+		end
+		if click then
+			return click(self, button, down)
+		end
+	end)
 	return b
 end
 
@@ -162,14 +311,14 @@ local function updateLiveButton(b, bag, slot)
 	end
 	updateQuest(b, bag, slot, texture ~= nil)
 	updateCooldown(b, bag, slot, texture ~= nil)
-	updateLevel(b, link, quality)
+	decorate(b, link, quality, info and info.itemID, info and info.isBound, bag, slot)
 
 	local new = texture ~= nil and C_NewItems ~= nil and C_NewItems.IsNewItem(bag, slot) or false
 	local paid = new and C.IsBattlePayItem ~= nil and C.IsBattlePayItem(bag, slot) or false
 	setGlow(b, new, paid, quality)
 
 	if b.JunkIcon then
-		b.JunkIcon:SetShown(SatchelDB.junkIcon and quality == 0 and not info.hasNoValue or false)
+		b.JunkIcon:SetShown(SatchelDB.junkIcon and quality == 0 and not info.hasNoValue and not ns.IsProtected(info.itemID) or false)
 	end
 
 	-- Plain field read only by our own search code.
@@ -220,7 +369,7 @@ local function updateOfflineButton(b, item)
 	if SetItemButtonQuality and b.IconBorder then
 		SetItemButtonQuality(b, item and item.q, link)
 	end
-	updateLevel(b, link, item and item.q)
+	decorate(b, link, item and item.q, item and item.id, item and item.b)
 	b.satchelName = nameOf(link)
 end
 
@@ -343,6 +492,13 @@ function ns.NewWindow(key, opts)
 	if opts.money then
 		frame.money = CreateFrame('Frame', 'Satchel' .. key .. 'Money', frame, 'SmallMoneyFrameTemplate')
 		frame.money:SetPoint('BOTTOMRIGHT', -PAD + 6, 10)
+		-- Hovering the gold lists every character's gold.
+		local mname = frame.money:GetName()
+		for _, f in ipairs({ frame.money, _G[mname .. 'GoldButton'], _G[mname .. 'SilverButton'], _G[mname .. 'CopperButton'] }) do
+			f:EnableMouse(true)
+			f:HookScript('OnEnter', function(self) ns.ShowGoldTooltip(self) end)
+			f:HookScript('OnLeave', GameTooltip_Hide)
+		end
 	end
 
 	frame:SetScript('OnHide', function(self)
@@ -512,7 +668,9 @@ function Window:RenderOffline()
 	local data = c and c[self.opts.store]
 	local bags = {}
 	for bag in pairs(data or {}) do
-		bags[#bags + 1] = bag
+		if bag ~= KEYRING_CONTAINER or SatchelDB.showKeyring then
+			bags[#bags + 1] = bag
+		end
 	end
 	table.sort(bags)
 
