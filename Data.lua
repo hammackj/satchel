@@ -105,8 +105,8 @@ function ns.ShowGoldTooltip(owner)
 end
 
 --[[ Protected items ]]--
--- Alt-click marks an item (by item ID, account-wide) so Sell junk and
--- right-click selling at a vendor leave it alone.
+-- Alt-click marks an item (by item ID, account-wide): Sell junk and
+-- right-click selling at a vendor leave it alone, and sorting leaves it in its slot.
 
 function ns.IsProtected(itemID)
 	return itemID ~= nil and SatchelDB.protected[itemID] == true

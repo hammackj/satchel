@@ -109,7 +109,9 @@ inventory = ns.NewWindow('Inventory', {
 	live = function() return true end,
 	columns = 'columns',
 	money = true,
-	sort = C.SortBags,
+	sort = function()
+		ns.SortBags(ns.InventoryBags(true), C.SortBags)
+	end,
 	buttons = {
 		{ 'Interface\\Icons\\INV_Misc_Coin_02', 'Bank', toggleBank },
 		{ 'Interface\\Icons\\INV_Misc_Key_03', 'Show/hide keyring', function()
@@ -137,11 +139,13 @@ bank = ns.NewWindow('Bank', {
 	live = function() return atBank end,
 	columns = 'bankColumns',
 	sort = function()
-		if C.SortBank then
-			C.SortBank(CHARACTER_BANK)
-		elseif C.SortBankBags then
-			C.SortBankBags()
-		end
+		ns.SortBags(ns.BankBags(), function()
+			if C.SortBank then
+				C.SortBank(CHARACTER_BANK)
+			elseif C.SortBankBags then
+				C.SortBankBags()
+			end
+		end, function() return atBank end)
 	end,
 	default = { 'TOPLEFT', 'TOPLEFT', 60, -120 },
 	onHide = function()

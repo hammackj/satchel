@@ -13,7 +13,7 @@ All your bags in one window, for WoW Forever.
 - Sell junk button at vendors, coin marker on grey items
 - Item level on gear, a "BoE" label on unbound bind-on-equip items, and a green arrow on gear that's an upgrade over what you're wearing
 - Hover your gold to see every character's gold and the total
-- Alt-click an item to protect it: Sell junk skips it and right-click won't sell it at a vendor
+- Alt-click an item to protect it: Sell junk skips it, right-click won't sell it at a vendor, and sorting leaves it in its slot (Satchel's own sort runs then, since Blizzard's can't skip items)
 - Key button to show or hide the keyring
 - Bank window for your character bank tabs (opens at the banker; closing it ends the bank visit)
 - Free slot count and gold

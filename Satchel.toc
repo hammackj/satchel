@@ -9,5 +9,6 @@
 
 Debug.lua
 Data.lua
+Sort.lua
 Window.lua
 Satchel.lua
