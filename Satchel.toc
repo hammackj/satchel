@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Satchel
+## Notes: All your bags in one window.
+## Author: hammackj
+## Version: @project-version@
+## SavedVariables: SatchelDB
+## Category: Bags & Inventory
+
+Debug.lua
+Frame.lua
+Satchel.lua

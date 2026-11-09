@@ -1,0 +1,5 @@
+package-as: Satchel
+
+ignore:
+  - README.md
+  - scripts
