@@ -61,10 +61,21 @@ do
 end
 
 -- Taint: a protected action was blocked because insecure code touched its path.
-local taint = CreateFrame('Frame')
-taint:RegisterEvent('ADDON_ACTION_BLOCKED')
-taint:RegisterEvent('ADDON_ACTION_FORBIDDEN')
-taint:SetScript('OnEvent', function(_, event, addon, func)
+-- ADDON_LOADED is handled here too, so errors raised while Satchel's other
+-- files load (before Satchel.lua can register anything) still get saved.
+local watcher = CreateFrame('Frame')
+watcher:RegisterEvent('ADDON_ACTION_BLOCKED')
+watcher:RegisterEvent('ADDON_ACTION_FORBIDDEN')
+watcher:RegisterEvent('ADDON_LOADED')
+watcher:SetScript('OnEvent', function(self, event, addon, func)
+	if event == 'ADDON_LOADED' then
+		if addon == ADDON then
+			SatchelDB = SatchelDB or {}
+			ns.FlushLog()
+			self:UnregisterEvent('ADDON_LOADED')
+		end
+		return
+	end
 	ns.Log(event, tostring(addon) .. ' -> ' .. tostring(func) .. (InCombatLockdown() and ' (in combat)' or ''))
 end)
 
