@@ -261,6 +261,7 @@ local function junk()
 end
 
 local function sellJunk()
+	sellRun = sellRun + 1 -- cancels any queue still running
 	local slots, _, skipped = junk()
 	-- Blizzard's sell-all would also sell protected greys, so only use it when there are none.
 	if not skipped and C_MerchantFrame and C_MerchantFrame.SellAllJunkItems then
@@ -270,7 +271,6 @@ local function sellJunk()
 	-- One at a time, spaced out so the vendor keeps up. Items can move while
 	-- this runs (sorting, looting, dragging), so each sale checks the slot
 	-- still holds the same sellable grey item; otherwise it's left alone.
-	sellRun = sellRun + 1
 	local run = sellRun
 	for i, s in ipairs(slots) do
 		C_Timer.After((i - 1) * 0.2, function()
@@ -417,6 +417,7 @@ end
 
 function handlers.MERCHANT_CLOSED()
 	atMerchant = false
+	sellRun = sellRun + 1
 	ns.UpdateJunkButton()
 end
 
