@@ -231,6 +231,8 @@ end
 --[[ Junk ]]--
 
 local atMerchant = false
+-- Bumped by each Sell junk click, so a second click replaces the first queue.
+local sellRun = 0
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 
 function ns.AtMerchant()
@@ -248,7 +250,7 @@ local function junk()
 				if ns.IsProtected(info.itemID) then
 					skipped = true
 				else
-					slots[#slots + 1] = { bag, slot }
+					slots[#slots + 1] = { bag, slot, info.hyperlink }
 					local price = select(11, GetItemInfo(info.hyperlink))
 					value = value + (price or 0) * (info.stackCount or 1)
 				end
@@ -265,10 +267,19 @@ local function sellJunk()
 		C_MerchantFrame.SellAllJunkItems()
 		return
 	end
-	-- One at a time, spaced out so the vendor keeps up.
+	-- One at a time, spaced out so the vendor keeps up. Items can move while
+	-- this runs (sorting, looting, dragging), so each sale checks the slot
+	-- still holds the same sellable grey item; otherwise it's left alone.
+	sellRun = sellRun + 1
+	local run = sellRun
 	for i, s in ipairs(slots) do
 		C_Timer.After((i - 1) * 0.2, function()
-			if atMerchant then
+			if run ~= sellRun or not atMerchant then
+				return
+			end
+			local info = C.GetContainerItemInfo(s[1], s[2])
+			if info and info.hyperlink == s[3] and info.quality == 0 and not info.hasNoValue
+				and not info.isLocked and not ns.IsProtected(info.itemID) then
 				C.UseContainerItem(s[1], s[2])
 			end
 		end)
