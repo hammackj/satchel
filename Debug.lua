@@ -78,6 +78,7 @@ local PROBE_GLOBALS = {
 	'SetItemButtonTexture', 'SetItemButtonCount', 'SetItemButtonDesaturated', 'SetItemButtonQuality',
 	'CooldownFrame_Set', 'MoneyFrame_Update', 'GetCoinTextureString',
 	'TEXTURE_ITEM_QUEST_BANG', 'TEXTURE_ITEM_QUEST_BORDER', 'BankFrame', 'SortBags',
+	'NEW_ITEM_ATLAS_BY_QUALITY', 'CloseBankFrame', 'C_PlayerInteractionManager', 'SOUNDKIT',
 }
 
 local PROBE_TEMPLATES = {
@@ -111,6 +112,9 @@ function ns.Probe()
 	end
 	p.container = keys(C_Container)
 	p.itemButtonMixin = keys(ContainerFrameItemButtonMixin)
+	p.cbank = keys(C_Bank)
+	p.bankType = Enum.BankType and CopyTable(Enum.BankType)
+	p.numCharacterBankSlots = Constants and Constants.InventoryConstants and Constants.InventoryConstants.NumCharacterBankSlots
 	if Enum and Enum.BagIndex then
 		p.bagIndex = {}
 		for k, v in pairs(Enum.BagIndex) do
