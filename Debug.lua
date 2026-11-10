@@ -90,6 +90,7 @@ local PROBE_GLOBALS = {
 	'CooldownFrame_Set', 'MoneyFrame_Update', 'GetCoinTextureString',
 	'TEXTURE_ITEM_QUEST_BANG', 'TEXTURE_ITEM_QUEST_BORDER', 'BankFrame', 'SortBags',
 	'NEW_ITEM_ATLAS_BY_QUALITY', 'CloseBankFrame', 'C_PlayerInteractionManager', 'SOUNDKIT',
+	'MerchantSellAllJunkButton', 'C_MerchantFrame',
 }
 
 local PROBE_TEMPLATES = {

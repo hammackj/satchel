@@ -286,6 +286,28 @@ local function sellJunk()
 	end
 end
 
+-- The vendor window's own "Sell All Junk" button runs Blizzard's sell-all,
+-- which knows nothing about Satchel's locks and sells locked greys too. When
+-- there are locked greys, send it through Satchel's queue instead; otherwise
+-- leave Blizzard's button (and its confirmation) alone.
+local vendorHooked = false
+local function hookVendorButton()
+	local button = MerchantSellAllJunkButton
+	if vendorHooked or not button then
+		return
+	end
+	vendorHooked = true
+	local blizzard = button:GetScript('OnClick')
+	button:SetScript('OnClick', function(self, ...)
+		if select(3, junk()) then
+			print('|cff33ff99Satchel|r: selling junk, keeping your locked items')
+			sellJunk()
+		elseif blizzard then
+			blizzard(self, ...)
+		end
+	end)
+end
+
 junkButton = CreateFrame('Button', nil, inventory, 'UIPanelButtonTemplate')
 junkButton:SetSize(80, 20)
 junkButton:SetPoint('BOTTOM', 0, 8)
@@ -412,6 +434,7 @@ handlers.SKILL_LINES_CHANGED = handlers.PLAYER_LEVEL_UP
 
 function handlers.MERCHANT_SHOW()
 	atMerchant = true
+	hookVendorButton()
 	ns.UpdateJunkButton()
 end
 
