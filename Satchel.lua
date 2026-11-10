@@ -132,6 +132,22 @@ inventory = ns.NewWindow('Inventory', {
 	end,
 })
 
+-- Hands the open bank to Blizzard's own window, for what Satchel doesn't do
+-- (buying bank slots or tabs). The next visit to a banker is Satchel's again.
+local blizzardBankOnHide -- BankFrame's own OnHide, saved the first time we see it
+local handingOver = false
+local function showBlizzardBank()
+	if not (atBank and BankFrame) then
+		print('|cff33ff99Satchel|r: visit a banker first')
+		return
+	end
+	BankFrame:SetScript('OnHide', blizzardBankOnHide or nil)
+	BankFrame:SetParent(UIParent)
+	handingOver = true
+	bank:Close()
+	handingOver = false
+end
+
 bank = ns.NewWindow('Bank', {
 	title = function() return ns.CharacterLabel(ns.me) .. ' - ' .. (BANK or 'Bank') end,
 	bags = ns.BankBags,
@@ -147,9 +163,14 @@ bank = ns.NewWindow('Bank', {
 			end
 		end, function() return atBank end)
 	end,
+	buttons = {
+		{ 'Interface\\Icons\\INV_Misc_Bag_08', 'Blizzard bank (buy bank slots)', function()
+			showBlizzardBank()
+		end },
+	},
 	default = { 'TOPLEFT', 'TOPLEFT', 60, -120 },
 	onHide = function()
-		if atBank and closeBank then
+		if atBank and closeBank and not handingOver then
 			closeBank()
 		end
 	end,
@@ -203,15 +224,22 @@ local parked = CreateFrame('Frame', nil, UIParent)
 parked:SetScale(0.001)
 parked:SetAlpha(0)
 
-local blizzardBankOnHide -- BankFrame's own OnHide, saved the first time we see it
 
-local function onBlizzardBankShown(panel)
+local onBlizzardBankShown
+function onBlizzardBankShown(panel, retries)
 	if blizzardBankOnHide == nil then
 		blizzardBankOnHide = panel:GetScript('OnHide') or false
 	end
 	local take = bankHasTabs()
 	SatchelDB.debug = SatchelDB.debug or {}
 	SatchelDB.debug.bank = { t = date('%Y-%m-%d %H:%M:%S'), tabs = take, numTabs = NUM_BANK_TABS }
+	-- Contents arrive a moment after the banker opens.
+	C_Timer.After(0.5, function()
+		local ok, err = pcall(ns.ProbeBank, take)
+		if not ok then
+			ns.Log('bank probe', err)
+		end
+	end)
 	if take then
 		panel:SetScript('OnHide', nil)
 		panel:SetParent(parked)
@@ -225,6 +253,16 @@ local function onBlizzardBankShown(panel)
 	else
 		panel:SetScript('OnHide', blizzardBankOnHide or nil)
 		panel:SetParent(UIParent)
+		-- On the first visit after logging in, the bank's tabs can arrive a
+		-- moment after BankFrame shows; look again before leaving it to Blizzard.
+		retries = retries or 0
+		if retries < 5 then
+			C_Timer.After(0.2 * 2 ^ retries, function()
+				if panel:IsShown() and not atBank then
+					onBlizzardBankShown(panel, retries + 1)
+				end
+			end)
+		end
 	end
 end
 

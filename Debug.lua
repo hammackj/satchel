@@ -159,3 +159,57 @@ function ns.Probe()
 	SatchelDB.debug = SatchelDB.debug or {}
 	SatchelDB.debug.probe = p
 end
+
+-- What the bank looks like to this client, per character, recorded each time
+-- the banker opens (Forever shows some characters a tabbed bank and others a
+-- classic one: a main grid plus bank bag slots).
+function ns.ProbeBank(takenOver)
+	local b = { t = date('%Y-%m-%d %H:%M:%S'), takenOver = takenOver }
+	local function try(fn, ...)
+		if type(fn) ~= 'function' then
+			return 'missing'
+		end
+		local r = { pcall(fn, ...) }
+		if not r[1] then
+			return 'error: ' .. tostring(r[2])
+		end
+		table.remove(r, 1)
+		return #r <= 1 and r[1] or r
+	end
+	local bankType = Enum.BankType and Enum.BankType.Character or 0
+	b.purchasedTabIDs = C_Bank and try(C_Bank.FetchPurchasedBankTabIDs, bankType)
+	local data = C_Bank and try(C_Bank.FetchPurchasedBankTabData, bankType)
+	b.purchasedTabData = type(data) == 'table' and #data or data
+	b.canPurchaseTab = C_Bank and try(C_Bank.CanPurchaseBankTab, bankType)
+	b.numBankSlots = try(GetNumBankSlots)
+	b.globals = {}
+	for _, name in ipairs({ 'BANK_CONTAINER', 'NUM_BANKBAGSLOTS', 'NUM_BANKGENERIC_SLOTS', 'REAGENTBANK_CONTAINER', 'NUM_BANK_TABS' }) do
+		b.globals[name] = _G[name] == nil and 'nil' or _G[name]
+	end
+	b.bags = {}
+	for bag = -5, 30 do
+		local ok, slots = pcall(C_Container.GetContainerNumSlots, bag)
+		if ok and slots and slots > 0 then
+			local items = 0
+			for slot = 1, slots do
+				if C_Container.GetContainerItemInfo(bag, slot) then
+					items = items + 1
+				end
+			end
+			b.bags[tostring(bag)] = slots .. ' slots, ' .. items .. ' items'
+		end
+	end
+	b.bankFrameChildren = {}
+	if BankFrame then
+		for _, child in ipairs({ BankFrame:GetChildren() }) do
+			local name = child:GetName()
+			if name then
+				b.bankFrameChildren[#b.bankFrameChildren + 1] = name .. (child:IsShown() and '' or ' (hidden)')
+			end
+		end
+		table.sort(b.bankFrameChildren)
+	end
+	SatchelDB.debug = SatchelDB.debug or {}
+	SatchelDB.debug.bankProbe = SatchelDB.debug.bankProbe or {}
+	SatchelDB.debug.bankProbe[UnitName('player') or '?'] = b
+end
